@@ -135,6 +135,7 @@
     z-index: 2;
     color: #aaa;
     padding-bottom: 6px;
+    font-size: 8.5px;
   }
   .black.active {
     background: linear-gradient(to bottom, #3f6fa8, #1c3d5e);
@@ -143,6 +144,11 @@
   @media (orientation: portrait) {
     #app { display: none; }
     #rotateHint { display: flex; }
+  }
+
+  :fullscreen #app,
+  :-webkit-full-screen #app {
+    height: 100vh;
   }
 </style>
 </head>
@@ -168,6 +174,7 @@
           <option value="sawtooth">Bright</option>
           <option value="square">Chiptune</option>
         </select>
+        <button class="ctrl" id="fullscreenBtn" aria-label="Toggle fullscreen">⛶</button>
       </div>
     </div>
     <div id="piano"></div>
@@ -266,7 +273,7 @@
         var el = document.createElement("div");
         el.className = "key white";
         el.dataset.midi = midi;
-        el.textContent = (stepInOctave === 0) ? noteName(midi) : "";
+        el.textContent = noteName(midi);
         pianoEl.appendChild(el);
         keyElByMidi[midi] = el;
         whiteIndex++;
@@ -286,6 +293,7 @@
           bEl.className = "key black";
           var bMidi = m + 1;
           bEl.dataset.midi = bMidi;
+          bEl.textContent = noteName(bMidi);
           var blackWidthPct = whiteWidthPct * 0.6;
           var boundaryPct = (whiteIndex + 1) * whiteWidthPct;
           bEl.style.width = blackWidthPct + "%";
@@ -408,6 +416,30 @@
       baseMidi -= 12;
       buildPiano();
     }
+  });
+
+  // ---- Fullscreen ----
+  var fullscreenBtn = document.getElementById("fullscreenBtn");
+
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  fullscreenBtn.addEventListener("click", function () {
+    if (isFullscreen()) {
+      var exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) exit.call(document);
+    } else {
+      var el = document.documentElement;
+      var request = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (request) request.call(el);
+    }
+  });
+
+  ["fullscreenchange", "webkitfullscreenchange"].forEach(function (evt) {
+    document.addEventListener(evt, function () {
+      fullscreenBtn.textContent = isFullscreen() ? "⤡" : "⛶";
+    });
   });
 
   // Stop all notes if the tab is hidden / app backgrounded
