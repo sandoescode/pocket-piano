@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Piano</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#111111">
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #111;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  /* rotate hint shown only in portrait */
+  #rotateHint {
+    display: none;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    color: #888;
+    text-align: center;
+    padding: 24px;
+  }
+  #rotateHint .icon { font-size: 48px; margin-bottom: 12px; }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  #toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .group { display: flex; align-items: center; gap: 6px; }
+  button.ctrl {
+    background: #2a2a2a;
+    color: #eee;
+    border: 1px solid #3d3d3d;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 15px;
+    line-height: 1.2;
+    min-width: 34px;
+  }
+  button.ctrl:active { background: #444; }
+  #octaveLabel {
+    color: #ccc;
+    font-size: 13px;
+    min-width: 34px;
+    text-align: center;
+  }
+  select#waveform {
+    background: #2a2a2a;
+    color: #eee;
+    border: 1px solid #3d3d3d;
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  #title {
+    color: #666;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+  }
+
+  #piano {
+    position: relative;
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    padding-bottom: 4px;
+  }
+
+  .key {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 10px;
+    font-size: 11px;
+    color: #999;
+    border-radius: 0 0 6px 6px;
+    transition: background-color 0.05s ease;
+  }
+
+  .white {
+    flex: 1;
+    background: linear-gradient(to bottom, #fdfdfd, #e9e9e9);
+    border: 1px solid #999;
+    border-top: none;
+    z-index: 1;
+    color: #888;
+  }
+  .white.active {
+    background: linear-gradient(to bottom, #cfe8ff, #9fcdf5);
+  }
+
+  .black {
+    position: absolute;
+    top: 0;
+    height: 60%;
+    background: linear-gradient(to bottom, #333, #000);
+    border: 1px solid #000;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    z-index: 2;
+    color: #aaa;
+    padding-bottom: 6px;
+  }
+  .black.active {
+    background: linear-gradient(to bottom, #3f6fa8, #1c3d5e);
+  }
+
+  @media (orientation: portrait) {
+    #app { display: none; }
+    #rotateHint { display: flex; }
+  }
+</style>
+</head>
+<body>
+
+  <div id="rotateHint">
+    <div class="icon">📱↻</div>
+    <div>Rotate your iPhone to landscape<br>to play the piano</div>
+  </div>
+
+  <div id="app">
+    <div id="toolbar">
+      <div class="group">
+        <button class="ctrl" id="octDown">−</button>
+        <span id="octaveLabel">C4</span>
+        <button class="ctrl" id="octUp">+</button>
+      </div>
+      <div id="title">PIANO</div>
+      <div class="group">
+        <select id="waveform">
+          <option value="triangle" selected>Piano-ish</option>
+          <option value="sine">Soft</option>
+          <option value="sawtooth">Bright</option>
+          <option value="square">Chiptune</option>
+        </select>
+      </div>
+    </div>
+    <div id="piano"></div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  var WHITE_STEPS = [0,2,4,5,7,9,11]; // semitone offsets of white keys within an octave
+  var BLACK_AFTER = {0:true,1:true,3:true,4:true,5:true}; // white-key index -> has black key after it (within an octave, indices 0..6 = C D E F G A B)
+
+  var OCTAVE_COUNT = 2;       // how many octaves shown at once
+  var WHITE_PER_OCTAVE = 7;
+  var minBase = 36;  // C2
+  var maxBase = 72;  // C6
+  var baseMidi = 60; // C4 default start note
+
+  var pianoEl = document.getElementById("piano");
+  var octaveLabel = document.getElementById("octaveLabel");
+  var waveformSelect = document.getElementById("waveform");
+
+  function midiToFreq(m) {
+    return 440 * Math.pow(2, (m - 69) / 12);
+  }
+
+  function noteName(m) {
+    var name = NOTE_NAMES[((m % 12) + 12) % 12];
+    var octave = Math.floor(m / 12) - 1;
+    return name + octave;
+  }
+
+  // ---- Audio ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new Ctx();
+    }
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
+    return audioCtx;
+  }
+
+  var voices = {}; // midi -> {osc, gain}
+
+  function startNote(midi) {
+    var ctx = ensureAudio();
+    if (voices[midi]) return;
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.type = waveformSelect.value;
+    osc.frequency.value = midiToFreq(midi);
+    var now = ctx.currentTime;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.28, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.35);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    voices[midi] = { osc: osc, gain: gain };
+  }
+
+  function stopNote(midi) {
+    var v = voices[midi];
+    if (!v) return;
+    var ctx = ensureAudio();
+    var now = ctx.currentTime;
+    v.gain.gain.cancelScheduledValues(now);
+    v.gain.gain.setValueAtTime(v.gain.gain.value, now);
+    v.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+    v.osc.stop(now + 0.15);
+    delete voices[midi];
+  }
+
+  // ---- Keyboard layout building ----
+  var keyElByMidi = {};
+
+  function buildPiano() {
+    pianoEl.innerHTML = "";
+    keyElByMidi = {};
+
+    var totalWhite = OCTAVE_COUNT * WHITE_PER_OCTAVE + 1; // + final C
+    var whiteWidthPct = 100 / totalWhite;
+
+    var whiteIndex = 0;
+    var blackKeys = []; // {el, leftPct}
+
+    for (var i = 0; i <= OCTAVE_COUNT * 12; i++) {
+      var midi = baseMidi + i;
+      var stepInOctave = i % 12;
+      var isWhite = WHITE_STEPS.indexOf(stepInOctave) !== -1;
+
+      if (isWhite) {
+        var el = document.createElement("div");
+        el.className = "key white";
+        el.dataset.midi = midi;
+        el.textContent = (stepInOctave === 0) ? noteName(midi) : "";
+        pianoEl.appendChild(el);
+        keyElByMidi[midi] = el;
+        whiteIndex++;
+      }
+    }
+
+    // second pass: place black keys absolutely based on white key positions
+    whiteIndex = 0;
+    for (var j = 0; j <= OCTAVE_COUNT * 12; j++) {
+      var m = baseMidi + j;
+      var s = j % 12;
+      var isW = WHITE_STEPS.indexOf(s) !== -1;
+      if (isW) {
+        var whiteLocalIndex = WHITE_STEPS.indexOf(s); // 0..6 within octave (C..B)
+        if (BLACK_AFTER[whiteLocalIndex] && (j < OCTAVE_COUNT * 12)) {
+          var bEl = document.createElement("div");
+          bEl.className = "key black";
+          var bMidi = m + 1;
+          bEl.dataset.midi = bMidi;
+          var blackWidthPct = whiteWidthPct * 0.6;
+          var boundaryPct = (whiteIndex + 1) * whiteWidthPct;
+          bEl.style.width = blackWidthPct + "%";
+          bEl.style.left = (boundaryPct - blackWidthPct / 2) + "%";
+          pianoEl.appendChild(bEl);
+          keyElByMidi[bMidi] = bEl;
+        }
+        whiteIndex++;
+      }
+    }
+
+    octaveLabel.textContent = noteName(baseMidi);
+  }
+
+  // ---- Touch handling (multi-touch, glissando) ----
+  var activeTouches = {}; // touch identifier -> midi
+
+  function keyElAtPoint(x, y) {
+    var el = document.elementFromPoint(x, y);
+    if (!el) return null;
+    if (el.classList && el.classList.contains("key")) return el;
+    return null;
+  }
+
+  function activate(midi, el) {
+    if (el) el.classList.add("active");
+    startNote(midi);
+  }
+  function deactivate(midi, el) {
+    if (el) el.classList.remove("active");
+    stopNote(midi);
+  }
+
+  pianoEl.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    ensureAudio();
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      var el = keyElAtPoint(t.clientX, t.clientY);
+      if (el) {
+        var midi = parseInt(el.dataset.midi, 10);
+        activeTouches[t.identifier] = midi;
+        activate(midi, el);
+      }
+    }
+  }, { passive: false });
+
+  pianoEl.addEventListener("touchmove", function (e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      var el = keyElAtPoint(t.clientX, t.clientY);
+      var prevMidi = activeTouches[t.identifier];
+      var newMidi = el ? parseInt(el.dataset.midi, 10) : null;
+      if (newMidi !== prevMidi) {
+        if (prevMidi !== undefined && prevMidi !== null) {
+          deactivate(prevMidi, keyElByMidi[prevMidi]);
+        }
+        if (newMidi !== null) {
+          activate(newMidi, el);
+          activeTouches[t.identifier] = newMidi;
+        } else {
+          activeTouches[t.identifier] = null;
+        }
+      }
+    }
+  }, { passive: false });
+
+  function endTouch(e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      var midi = activeTouches[t.identifier];
+      if (midi !== undefined && midi !== null) {
+        deactivate(midi, keyElByMidi[midi]);
+      }
+      delete activeTouches[t.identifier];
+    }
+  }
+  pianoEl.addEventListener("touchend", endTouch, { passive: false });
+  pianoEl.addEventListener("touchcancel", endTouch, { passive: false });
+
+  // Mouse support (for testing on desktop)
+  var mouseDown = false;
+  var mouseMidi = null;
+  pianoEl.addEventListener("mousedown", function (e) {
+    ensureAudio();
+    mouseDown = true;
+    var el = e.target.closest(".key");
+    if (el) {
+      mouseMidi = parseInt(el.dataset.midi, 10);
+      activate(mouseMidi, el);
+    }
+  });
+  pianoEl.addEventListener("mousemove", function (e) {
+    if (!mouseDown) return;
+    var el = e.target.closest(".key");
+    var newMidi = el ? parseInt(el.dataset.midi, 10) : null;
+    if (newMidi !== mouseMidi) {
+      if (mouseMidi !== null) deactivate(mouseMidi, keyElByMidi[mouseMidi]);
+      if (newMidi !== null) activate(newMidi, el);
+      mouseMidi = newMidi;
+    }
+  });
+  window.addEventListener("mouseup", function () {
+    if (mouseMidi !== null) deactivate(mouseMidi, keyElByMidi[mouseMidi]);
+    mouseMidi = null;
+    mouseDown = false;
+  });
+
+  // ---- Octave shift ----
+  document.getElementById("octUp").addEventListener("click", function () {
+    if (baseMidi + 12 <= maxBase) {
+      baseMidi += 12;
+      buildPiano();
+    }
+  });
+  document.getElementById("octDown").addEventListener("click", function () {
+    if (baseMidi - 12 >= minBase) {
+      baseMidi -= 12;
+      buildPiano();
+    }
+  });
+
+  // Stop all notes if the tab is hidden / app backgrounded
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      Object.keys(voices).forEach(function (m) { stopNote(parseInt(m, 10)); });
+      Object.keys(keyElByMidi).forEach(function (m) {
+        keyElByMidi[m].classList.remove("active");
+      });
+      activeTouches = {};
+    }
+  });
+
+  buildPiano();
+})();
+</script>
+</body>
+</html>
