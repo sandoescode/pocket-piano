@@ -46,10 +46,36 @@
   #rotateHint .icon { font-size: 48px; margin-bottom: 12px; }
 
   #app {
+    position: relative;
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
+  }
+
+  body.immersive #toolbar {
+    display: none;
+  }
+
+  #exitImmersiveBtn {
+    display: none;
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 20;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    background: rgba(30, 30, 30, 0.65);
+    color: #eee;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    font-size: 16px;
+    line-height: 1;
+  }
+  body.immersive #exitImmersiveBtn {
+    display: flex;
   }
 
   #toolbar {
@@ -178,6 +204,7 @@
       </div>
     </div>
     <div id="piano"></div>
+    <button id="exitImmersiveBtn" aria-label="Exit fullscreen">⤡</button>
   </div>
 
 <script>
@@ -418,27 +445,50 @@
     }
   });
 
-  // ---- Fullscreen ----
+  // ---- Fullscreen / immersive mode ----
+  // The real Fullscreen API is unreliable on iOS: browsers other than Safari
+  // itself (Chrome, Firefox, Edge on iPhone all run in a WebKit wrapper) often
+  // silently ignore requestFullscreen(). So immersive mode is driven by a CSS
+  // class that always works, and the real API is only used as a bonus on top
+  // of it where the browser actually supports it.
   var fullscreenBtn = document.getElementById("fullscreenBtn");
+  var exitImmersiveBtn = document.getElementById("exitImmersiveBtn");
 
   function isFullscreen() {
     return !!(document.fullscreenElement || document.webkitFullscreenElement);
   }
 
-  fullscreenBtn.addEventListener("click", function () {
+  function enterImmersive() {
+    document.body.classList.add("immersive");
+    var el = document.documentElement;
+    var request = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (request) {
+      try {
+        var result = request.call(el);
+        if (result && result.catch) result.catch(function () {});
+      } catch (e) {}
+    }
+  }
+
+  function exitImmersive() {
+    document.body.classList.remove("immersive");
     if (isFullscreen()) {
       var exit = document.exitFullscreen || document.webkitExitFullscreen;
-      if (exit) exit.call(document);
-    } else {
-      var el = document.documentElement;
-      var request = el.requestFullscreen || el.webkitRequestFullscreen;
-      if (request) request.call(el);
+      if (exit) {
+        try {
+          var result = exit.call(document);
+          if (result && result.catch) result.catch(function () {});
+        } catch (e) {}
+      }
     }
-  });
+  }
+
+  fullscreenBtn.addEventListener("click", enterImmersive);
+  exitImmersiveBtn.addEventListener("click", exitImmersive);
 
   ["fullscreenchange", "webkitfullscreenchange"].forEach(function (evt) {
     document.addEventListener(evt, function () {
-      fullscreenBtn.textContent = isFullscreen() ? "⤡" : "⛶";
+      if (!isFullscreen()) document.body.classList.remove("immersive");
     });
   });
 
